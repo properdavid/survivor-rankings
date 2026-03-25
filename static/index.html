@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survivor Rankings</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#e85d26">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="stylesheet" href="/static/style.css?v={{CACHE_VERSION}}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <div class="logo">
+                <h1>🔥 SURVIVOR <span id="season-number"></span></h1>
+                <p class="subtitle">The Tribe Has Spoken</p>
+            </div>
+            <nav id="nav-area">
+                <button class="nav-btn active" data-tab="rankings">My Rankings</button>
+                <button class="nav-btn" data-tab="scores">My Scores</button>
+                <button class="nav-btn auth-only" data-tab="leaderboard" style="display:none;">Leaderboard</button>
+                <button class="nav-btn auth-only" data-tab="discussion" style="display:none;">Discussion</button>
+                <button class="nav-btn" data-tab="help">How to Play</button>
+                <button class="nav-btn admin-only" data-tab="admin" style="display:none;">Admin</button>
+            </nav>
+            <div id="user-area">
+                <a href="/auth/login" class="login-btn">Sign in with Google</a>
+            </div>
+        </div>
+    </header>
+
+    <div id="pull-to-refresh" class="ptr-container">
+        <div class="ptr-spinner"></div>
+    </div>
+
+    <main>
+        <!-- Past-season banner (hidden by default, shown by JS for non-active seasons) -->
+        <div id="past-season-banner" class="info-card warning" style="display:none;">
+            <p>📖 You are viewing a past season. Rankings and scores are read-only.</p>
+        </div>
+
+        <!-- Rankings Tab -->
+        <section id="tab-rankings" class="tab-content active">
+            <div class="tab-header">
+                <h2>Rank the Contestants</h2>
+                <p>Drag and drop to rank contestants. <strong>1 = Predicted Winner</strong>, <strong id="rank-last-label"></strong></p>
+                <p>Once the first elimination is recorded after you submit, your rankings are locked and you earn points as castaways are voted out.</p>
+            </div>
+            <div id="not-logged-in-msg" class="info-card" style="display:none;">
+                <p>🔒 Please <a href="/auth/login">sign in with Google</a> to submit your rankings.</p>
+            </div>
+            <div id="rankings-locked-msg" class="info-card warning" style="display:none;">
+                <p>🔒 Rankings are locked! Eliminations have begun.</p>
+            </div>
+            <div id="ranking-list" class="ranking-list"></div>
+            <div id="save-area" style="display:none;">
+                <button id="save-btn" class="primary-btn">💾 Save Rankings</button>
+                <button id="print-btn" class="secondary-btn" onclick="printRankings()">🖨️ Print</button>
+                <button id="email-btn" class="secondary-btn" onclick="emailRankings()">📧 Email to Me</button>
+                <span id="save-status"></span>
+            </div>
+        </section>
+
+        <!-- Scores Tab -->
+        <section id="tab-scores" class="tab-content">
+            <div class="tab-header">
+                <h2>My Scores</h2>
+                <p>See how your predictions match up with actual eliminations</p>
+            </div>
+            <div id="score-summary" class="score-summary"></div>
+            <div id="score-breakdown" class="score-breakdown"></div>
+        </section>
+
+        <!-- Leaderboard Tab -->
+        <section id="tab-leaderboard" class="tab-content">
+            <div class="tab-header">
+                <h2>Leaderboard</h2>
+                <p>See how everyone's predictions stack up</p>
+            </div>
+            <div id="leaderboard-list" class="leaderboard-list"></div>
+        </section>
+
+        <!-- Discussion Tab -->
+        <section id="tab-discussion" class="tab-content">
+            <div class="tab-header">
+                <h2>Episode Discussion</h2>
+                <p>Talk about each episode with other players</p>
+            </div>
+            <div class="info-card warning" style="margin-bottom:1rem;">
+                <p>&#9888;&#65039; <strong>Spoiler Warning:</strong> Episode discussions may contain spoilers for that episode and all previous episodes.</p>
+            </div>
+            <div id="discussion-admin-area"></div>
+            <div id="discussion-episode-list"></div>
+            <div id="discussion-thread-view" style="display:none;"></div>
+        </section>
+
+        <!-- Help Tab -->
+        <section id="tab-help" class="tab-content">
+            <div class="tab-header">
+                <h2>How to Play</h2>
+            </div>
+
+            <div class="help-section">
+                <h3>Submitting Your Rankings</h3>
+                <p>Before the season starts, rank all contestants from <strong>#1 (your predicted winner)</strong> to <strong>#N (your predicted first boot)</strong>. Once the first elimination is recorded after you submit, your rankings are locked and you earn points as castaways are voted out.</p>
+                <p>If you haven't submitted rankings yet and the season has already started, you can still submit — but <strong>you won't earn points for contestants who have already been eliminated or removed</strong>. Those picks will be marked as <span class="late-badge">Late pick</span> in your scores. All remaining contestants are scored normally.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>!! SPOILERS !!</h3>
+                <p>Eliminations for weeks 1 and 2 will be posted on the Tuesday before week 3 airs. After that, eliminations will be posted on the Tuesday following each episode.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>How Points Are Scored</h3>
+                <p>Scoring works differently for the <strong>Final 3</strong> versus everyone else.</p>
+
+                <h4 class="help-subheader">👑 Final 3 — Special Scoring</h4>
+                <p>The last three castaways standing are scored on whether you identified them as top contenders, not on exact position.</p>
+                <table class="scoring-table">
+                    <thead>
+                        <tr>
+                            <th>Contestant</th>
+                            <th>Your Rank</th>
+                            <th>Points</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="row-perfect"><td>👑 Winner</td><td>#1</td><td>20 pts</td></tr>
+                        <tr><td>👑 Winner</td><td>#2 or #3</td><td>10 pts</td></tr>
+                        <tr><td>👑 Winner</td><td>#4 or lower</td><td>Sliding scale (0–10 pts)</td></tr>
+                        <tr><td>Runner-up / 3rd place</td><td>#1, #2, or #3</td><td>10 pts</td></tr>
+                        <tr><td>Runner-up / 3rd place</td><td>#4 or lower</td><td>Sliding scale (0–10 pts)</td></tr>
+                    </tbody>
+                </table>
+
+                <h4 class="help-subheader">Standard Scoring — Everyone Else</h4>
+                <p>The sliding scale applies to all castaways eliminated before the Final 3, <em>and</em> to any Final 3 castaway you ranked outside your top 3. Points are based on how close your predicted rank is to their actual finish position.</p>
+                <table class="scoring-table">
+                    <thead>
+                        <tr>
+                            <th>Positions Off</th>
+                            <th>Points Earned</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="row-perfect"><td>Exact match (0 off)</td><td>10 pts</td></tr>
+                        <tr><td>Off by 1</td><td>9 pts</td></tr>
+                        <tr><td>Off by 2</td><td>8 pts</td></tr>
+                        <tr><td>Off by 3</td><td>7 pts</td></tr>
+                        <tr><td>Off by 4</td><td>6 pts</td></tr>
+                        <tr><td>Off by 5</td><td>5 pts</td></tr>
+                        <tr><td>Off by 6</td><td>4 pts</td></tr>
+                        <tr><td>Off by 7</td><td>3 pts</td></tr>
+                        <tr><td>Off by 8</td><td>2 pts</td></tr>
+                        <tr><td>Off by 9</td><td>1 pt</td></tr>
+                        <tr class="row-zero"><td>Off by 10 or more</td><td>0 pts</td></tr>
+                    </tbody>
+                </table>
+                <p class="help-note">Contestants still in the game don't affect your score yet — they'll be scored when they're eliminated or win.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>Removed Contestants</h3>
+                <p>Occasionally a castaway is pulled from the game for medical or other reasons rather than being voted out. When a contestant is marked as <strong>Removed</strong>, <strong>no points are awarded</strong> for that castaway regardless of how you ranked them. They will show as "Removed" in your score breakdown.</p>
+                <p class="help-note">Example: Aubrey is voted out 1st, Joe is removed 2nd, Tiffany is voted out 3rd. If you ranked Tiffany <strong>22nd</strong> (anticipating Joe's departure would push her to slot 3) <em>or</em> <strong>23rd</strong> (simply predicting she'd be the 2nd voted out) — both earn a perfect 10 pts.</p>
+            </div>
+
+            <div class="help-section">
+                <h3>Quick Examples</h3>
+                <p>You ranked <strong>Cirie Fields</strong> at #3. She finishes 4th (not in the final 3) — her finish position is 4. You're off by 1, earning <strong>9 points</strong>. Standard scoring always applies for non-Final-3 castaways, even when you had them in your top 3.</p>
+                <p>You ranked <strong>Ozzy Lusth</strong> at #2. He makes the final 3 but doesn't win — you had him in your top 3, earning <strong>10 points</strong>.</p>
+                <p>You ranked <strong>Rick Devens</strong> at #1. He wins the season — perfect pick, earning <strong>20 points</strong>.</p>
+            </div>
+        </section>
+
+        <!-- Admin Tab -->
+        <section id="tab-admin" class="tab-content">
+            <div class="tab-header">
+                <h2>Admin Panel</h2>
+            </div>
+            <div class="admin-sub-nav">
+                <button class="admin-sub-btn active" data-admin-tab="contestants">Contestant Management</button>
+                <button class="admin-sub-btn" data-admin-tab="tribes">Tribe Management</button>
+                <button class="admin-sub-btn" data-admin-tab="seasons">Season Management</button>
+                <button class="admin-sub-btn" data-admin-tab="users">User Management</button>
+                <button class="admin-sub-btn" data-admin-tab="database">Database</button>
+                <button class="admin-sub-btn" data-admin-tab="audit">Audit Log</button>
+            </div>
+            <div id="admin-panel-contestants" class="admin-panel-section">
+                <p class="section-desc">Record eliminations as they happen on the show</p>
+                <div id="admin-contestants" class="admin-list"></div>
+            </div>
+            <div id="admin-panel-tribes" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">Add or remove tribes and customize their UI color theme</p>
+                <div id="admin-tribes-list" class="admin-list"></div>
+                <div class="tribe-add-form">
+                    <input type="text" id="new-tribe-name" class="admin-input tribe-name-input" placeholder="New tribe name">
+                    <label class="tribe-color-label">
+                        <span>Color</span>
+                        <input type="color" id="new-tribe-color" value="#e85d26" class="tribe-color-input">
+                    </label>
+                    <button class="admin-btn btn-winner" onclick="createTribe()">Add Tribe</button>
+                </div>
+            </div>
+            <div id="admin-panel-seasons" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">Create new seasons and set the active season</p>
+                <div id="admin-seasons-list" class="admin-list"></div>
+                <div class="tribe-add-form">
+                    <input type="number" id="new-season-number" class="admin-input" placeholder="Season #" style="width:100px">
+                    <input type="text" id="new-season-name" class="admin-input tribe-name-input" placeholder="Season name (e.g. Season 51)">
+                    <button class="admin-btn btn-winner" onclick="createSeason()">Add Season</button>
+                </div>
+            </div>
+            <div id="admin-panel-users" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">Promote or demote users between admin and standard roles</p>
+                <div id="admin-users" class="admin-list"></div>
+            </div>
+            <div id="admin-panel-database" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">Export and import the full database for backup and restore</p>
+                <div class="database-admin">
+                    <div class="db-action">
+                        <h3>Export Backup</h3>
+                        <p>Download the entire database as a file you can save for safekeeping.</p>
+                        <button class="admin-btn btn-winner" onclick="exportDatabase()">Download Backup</button>
+                    </div>
+                    <div class="db-action">
+                        <h3>Import Backup</h3>
+                        <p>Replace the current database with a previously exported backup. This will overwrite all existing data.</p>
+                        <input type="file" id="db-import-file" accept=".db,.sqlite,.sqlite3">
+                        <button class="admin-btn btn-danger" onclick="importDatabase()">Restore from Backup</button>
+                    </div>
+                </div>
+            </div>
+            <div id="admin-panel-audit" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">View ranking submission history per user for incident investigation</p>
+                <div class="audit-controls">
+                    <select id="audit-user-select" class="admin-input" onchange="loadAuditLog()">
+                        <option value="">Select a user...</option>
+                    </select>
+                </div>
+                <div id="audit-log-list"></div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="footer-content">
+            <select id="season-select" class="season-select" onchange="switchSeason(this.value)" title="Switch season"></select>
+            <p><a href="#" onclick="showWhatsNew(); return false" class="version-link">Survivor Rankings v30</a></p>
+        </div>
+    </footer>
+
+    <script src="/static/app.js?v={{CACHE_VERSION}}"></script>
+</body>
+</html>

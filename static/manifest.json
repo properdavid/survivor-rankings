@@ -1,0 +1,21 @@
+{
+  "name": "Survivor Rankings",
+  "short_name": "SurvivorRank",
+  "description": "Predict the elimination order and compete on the leaderboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f0f1a",
+  "theme_color": "#e85d26",
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
