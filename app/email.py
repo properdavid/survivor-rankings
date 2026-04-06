@@ -1,6 +1,7 @@
-"""Email utility for sending rankings summaries."""
+"""Email utility for sending rankings summaries and admin broadcasts."""
 
 import logging
+import re as _re
 import smtplib
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -139,3 +140,64 @@ def send_rankings_email(
         logger.info("Rankings email sent to %s", to_email)
     except Exception:
         logger.exception("Failed to send rankings email to %s", to_email)
+
+
+def build_broadcast_html(body_html: str) -> str:
+    """Build a styled HTML email matching the site's dark/orange aesthetic.
+
+    body_html is already HTML from the contenteditable editor.
+    Caller must strip <script> tags before passing.
+    """
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f0f1a;">
+    <div style="max-width:600px;margin:20px auto;background:#1a1a2e;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+        <a href="https://survivor.mendozaflix.com/" style="display:block;text-decoration:none;background:#1a1a2e;padding:20px 24px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <span style="font-size:32px;line-height:1;">🔥</span>
+                <span style="font-family:'Bebas Neue',sans-serif;font-size:32px;letter-spacing:3px;color:#fff;">SURVIVOR <span style="color:#e85d26;">RANKINGS</span></span>
+            </div>
+        </a>
+        <div style="height:3px;background:linear-gradient(90deg,#e85d26,#f5a623);"></div>
+        <div style="padding:28px 32px;color:#e8e8f0;font-size:15px;line-height:1.7;">
+            {body_html}
+        </div>
+        <div style="padding:16px 24px;text-align:center;color:#8888a0;font-size:12px;border-top:1px solid #2a2a45;">
+            <a href="https://survivor.mendozaflix.com/" style="color:#8888a0;text-decoration:underline;">Survivor Rankings</a> &bull; You are receiving this because you registered an account.
+        </div>
+    </div>
+</body>
+</html>"""
+
+
+def send_broadcast_email(
+    to_email: str,
+    to_name: str,
+    subject: str,
+    body_html: str,
+    body_text: str,
+) -> None:
+    """Send a broadcast email to a single recipient. No-ops if SMTP not configured."""
+    if not is_email_configured():
+        return
+    try:
+        safe_html = _re.sub(
+            r"<script[^>]*>.*?</script>", "", body_html,
+            flags=_re.DOTALL | _re.IGNORECASE,
+        )
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_EMAIL
+        msg["To"] = to_email
+        msg.attach(MIMEText(body_text, "plain"))
+        msg.attach(MIMEText(build_broadcast_html(safe_html), "html"))
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+            server.login(SMTP_EMAIL, SMTP_PASSWORD)
+            server.send_message(msg)
+        logger.info("Broadcast email sent to %s", to_email)
+    except Exception:
+        logger.exception("Failed to send broadcast email to %s", to_email)

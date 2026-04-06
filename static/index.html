@@ -104,29 +104,32 @@
                 <h2>Bonus Questions</h2>
                 <p>Answer bonus questions throughout the season for extra points.</p>
             </div>
-            <div class="help-section" style="margin-bottom:1.5rem">
-                <p>Each question has a <strong>deadline</strong> — once it passes, you can no longer submit or change your answer, and everyone's answers become visible.</p>
-                <h3 style="margin-top:1rem">Scoring Types</h3>
-                <div class="help-section" style="margin-top:0.5rem;padding-top:0.5rem">
-                    <h4 class="help-subheader">Standard</h4>
-                    <p>A fixed number of points are awarded based on how correct your answer is. Full points for a correct answer, partial points for a close answer, and no points for an incorrect answer.</p>
+            <details class="bonus-instructions" style="margin-bottom:1.5rem">
+                <summary>How it works</summary>
+                <div class="help-section" style="margin-top:0.75rem">
+                    <p>Each question has a <strong>deadline</strong> — once it passes, you can no longer submit or change your answer, and everyone's answers become visible.</p>
+                    <h3 style="margin-top:1rem">Scoring Types</h3>
+                    <div class="help-section" style="margin-top:0.5rem;padding-top:0.5rem">
+                        <h4 class="help-subheader">Standard</h4>
+                        <p>A fixed number of points are awarded based on how correct your answer is. Full points for a correct answer, partial points for a close answer, and no points for an incorrect answer.</p>
+                    </div>
+                    <div class="help-section" style="margin-top:0.5rem;padding-top:0.5rem">
+                        <h4 class="help-subheader">Wager</h4>
+                        <p>You choose how many points to put on the line (up to the question's maximum). The outcome determines what happens to your wager:</p>
+                        <table class="scoring-table" style="margin-top:0.5rem">
+                            <thead>
+                                <tr><th>Result</th><th>Points</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr class="row-perfect"><td>✅ Correct</td><td>+wager (you gain your wager amount)</td></tr>
+                                <tr><td>〰️ Partial</td><td>±0 (you break even)</td></tr>
+                                <tr class="row-zero"><td>❌ Incorrect</td><td>−wager (you lose your wager amount)</td></tr>
+                            </tbody>
+                        </table>
+                        <p class="help-note" style="margin-top:0.5rem">Bonus points are added to your total score and reflected on the leaderboard once an admin records the outcome.</p>
+                    </div>
                 </div>
-                <div class="help-section" style="margin-top:0.5rem;padding-top:0.5rem">
-                    <h4 class="help-subheader">Wager</h4>
-                    <p>You choose how many points to put on the line (up to the question's maximum). The outcome determines what happens to your wager:</p>
-                    <table class="scoring-table" style="margin-top:0.5rem">
-                        <thead>
-                            <tr><th>Result</th><th>Points</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr class="row-perfect"><td>✅ Correct</td><td>+wager (you gain your wager amount)</td></tr>
-                            <tr><td>〰️ Partial</td><td>±0 (you break even)</td></tr>
-                            <tr class="row-zero"><td>❌ Incorrect</td><td>−wager (you lose your wager amount)</td></tr>
-                        </tbody>
-                    </table>
-                    <p class="help-note" style="margin-top:0.5rem">Bonus points are added to your total score and reflected on the leaderboard once an admin records the outcome.</p>
-                </div>
-            </div>
+            </details>
             <div id="bonus-questions-list"></div>
         </section>
 
@@ -221,6 +224,7 @@
                 <button class="admin-sub-btn" data-admin-tab="seasons">Season Management</button>
                 <button class="admin-sub-btn" data-admin-tab="users">User Management</button>
                 <button class="admin-sub-btn" data-admin-tab="bonus">Bonus Questions</button>
+                <button class="admin-sub-btn" data-admin-tab="email">Email Users</button>
                 <button class="admin-sub-btn" data-admin-tab="database">Database</button>
                 <button class="admin-sub-btn" data-admin-tab="audit">Audit Log</button>
             </div>
@@ -256,6 +260,10 @@
             <div id="admin-panel-bonus" class="admin-panel-section" style="display:none;">
                 <p class="section-desc">Create and grade bonus questions for the active season</p>
                 <div id="admin-bonus-content"></div>
+            </div>
+            <div id="admin-panel-email" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">Compose and send an email to selected registered users. Each user receives a separate email.</p>
+                <div id="admin-email-content"></div>
             </div>
             <div id="admin-panel-database" class="admin-panel-section" style="display:none;">
                 <p class="section-desc">Export and import the full database for backup and restore</p>

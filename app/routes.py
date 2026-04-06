@@ -18,7 +18,7 @@ from typing import Optional
 from sqlalchemy import func
 from app.models import User, Season, Contestant, Ranking, TribeConfig, EpisodeThread, DiscussionPost, PostReaction, RankingAuditSubmission, RankingAuditEntry, BonusQuestion, BonusAnswer
 from app.scoring import calculate_total_score
-from app.email import send_rankings_email
+from app.email import send_rankings_email, send_broadcast_email, is_email_configured
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,13 @@ class BonusAnswerSubmit(BaseModel):
 class BonusGrade(BaseModel):
     user_id: int
     outcome: str                # "correct", "partial", "incorrect"
+
+
+class BroadcastEmailRequest(BaseModel):
+    user_ids: list[int]
+    subject: str
+    body_html: str
+    body_text: str
 
 
 # In-memory cache for cropped images: url -> jpeg bytes (insertion-order LRU eviction)
@@ -1231,6 +1238,28 @@ def grade_bonus_answer(
         "points_earned": ba.points_earned,
         "message": f"Answer graded as '{data.outcome}'",
     }
+
+
+@router.post("/admin/send-email")
+def send_broadcast(
+    payload: BroadcastEmailRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    require_admin(request)
+    if not payload.subject.strip() or not payload.body_text.strip():
+        raise HTTPException(status_code=400, detail="Subject and body are required")
+    if not payload.user_ids:
+        raise HTTPException(status_code=400, detail="No recipients selected")
+    users = db.query(User).filter(User.id.in_(payload.user_ids)).all()
+    for user in users:
+        background_tasks.add_task(
+            send_broadcast_email,
+            user.email, user.name,
+            payload.subject.strip(), payload.body_html, payload.body_text.strip(),
+        )
+    return {"sent_to": len(users), "email_configured": is_email_configured()}
 
 
 # --- Discussion helpers ---

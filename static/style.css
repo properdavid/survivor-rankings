@@ -1774,6 +1774,33 @@ footer .season-select {
 }
 
 /* === Bonus Questions === */
+.bonus-instructions {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+}
+.bonus-instructions > summary {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-muted);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    user-select: none;
+}
+.bonus-instructions > summary::before {
+    content: "▶";
+    font-size: 0.7rem;
+    transition: transform 0.2s;
+}
+.bonus-instructions[open] > summary::before {
+    transform: rotate(90deg);
+}
+.bonus-instructions > summary::-webkit-details-marker { display: none; }
+.bonus-instructions > div { padding: 0 1rem 1rem; }
+
 .bonus-answer-input {
     width: 100%;
     text-align: left;
@@ -1819,6 +1846,83 @@ footer .season-select {
 .deadline-past {
     color: var(--text-muted);
     font-style: italic;
+}
+
+/* === Email Broadcast (Admin) === */
+.email-compose-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    max-width: 700px;
+}
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.form-label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+.rich-editor-toolbar {
+    display: flex;
+    gap: 6px;
+    padding: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: var(--radius) var(--radius) 0 0;
+}
+.rich-editor-toolbar button {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+}
+.rich-editor-toolbar button:hover { background: var(--bg-card-hover); }
+.rich-editor-body {
+    min-height: 180px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 0 0 var(--radius) var(--radius);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    outline: none;
+}
+.rich-editor-body:focus { border-color: var(--primary); }
+.rich-editor-body ul,
+.rich-editor-body ol {
+    padding-left: 1.5rem;
+}
+.email-recipients-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.75rem;
+    background: var(--bg);
+}
+.email-recipient-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+.email-recipient-row input[type="checkbox"] {
+    accent-color: var(--primary);
+    width: 15px;
+    height: 15px;
+    cursor: pointer;
 }
 
 input[type="datetime-local"]::-webkit-calendar-picker-indicator {

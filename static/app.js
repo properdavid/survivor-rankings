@@ -1307,6 +1307,93 @@ async function gradeAnswer(questionId, userId) {
     }
 }
 
+// --- Admin: Email Users ---
+
+async function loadAdminEmailPanel() {
+    try {
+        const res = await fetch(`/api/admin/users${seasonParam()}`);
+        if (!res.ok) return;
+        const users = await res.json();
+        renderAdminEmailPanel(users);
+    } catch (e) {
+        console.error("Failed to load users for email panel:", e);
+    }
+}
+
+function renderAdminEmailPanel(users) {
+    const el = document.getElementById("admin-email-content");
+    if (!el) return;
+
+    const userRows = users.map(u => `
+        <label class="email-recipient-row">
+            <input type="checkbox" class="email-recipient-cb" value="${u.id}" checked>
+            <span>${escapeHtml(u.name)}</span>
+            <span class="text-muted" style="font-size:0.85rem;">(${escapeHtml(u.email)})</span>
+        </label>
+    `).join("");
+
+    el.innerHTML = `
+        <div class="email-compose-form">
+            <div class="form-group">
+                <label class="form-label">Subject</label>
+                <input type="text" id="email-subject" class="admin-input" style="width:100%;text-align:left;" placeholder="Email subject">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Body</label>
+                <div class="rich-editor-toolbar">
+                    <button type="button" onclick="document.execCommand('bold')" title="Bold"><b>B</b></button>
+                    <button type="button" onclick="document.execCommand('italic')" title="Italic"><i>I</i></button>
+                    <button type="button" onclick="document.execCommand('underline')" title="Underline"><u>U</u></button>
+                    <button type="button" onclick="document.execCommand('insertUnorderedList')" title="Bullet list">• List</button>
+                    <button type="button" onclick="document.execCommand('insertOrderedList')" title="Numbered list">1. List</button>
+                </div>
+                <div id="email-body" contenteditable="true" class="rich-editor-body"></div>
+            </div>
+            <div class="form-group">
+                <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.5rem;">
+                    <label class="form-label" style="margin:0;">Recipients</label>
+                    <button type="button" class="admin-btn" style="padding:0.25rem 0.6rem;font-size:0.8rem;" onclick="setAllEmailRecipients(true)">Select All</button>
+                    <button type="button" class="admin-btn" style="padding:0.25rem 0.6rem;font-size:0.8rem;" onclick="setAllEmailRecipients(false)">Deselect All</button>
+                </div>
+                <div class="email-recipients-list">${userRows}</div>
+            </div>
+            <button type="button" class="primary-btn" onclick="sendBroadcastEmail()">Send Email</button>
+        </div>
+    `;
+}
+
+function setAllEmailRecipients(checked) {
+    document.querySelectorAll(".email-recipient-cb").forEach(cb => cb.checked = checked);
+}
+
+async function sendBroadcastEmail() {
+    const subject = document.getElementById("email-subject")?.value.trim();
+    const bodyEl = document.getElementById("email-body");
+    if (!bodyEl) return;
+    const bodyHtml = bodyEl.innerHTML.trim();
+    const bodyText = bodyEl.innerText.trim();
+    const checked = [...document.querySelectorAll(".email-recipient-cb:checked")].map(cb => parseInt(cb.value));
+    if (!subject) { showToast("Subject is required", "error"); return; }
+    if (!bodyText) { showToast("Body is required", "error"); return; }
+    if (!checked.length) { showToast("No recipients selected", "error"); return; }
+    try {
+        const res = await fetch("/api/admin/send-email", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_ids: checked, subject, body_html: bodyHtml, body_text: bodyText }),
+        });
+        const data = await res.json();
+        if (!res.ok) { showToast(data.detail || "Error sending email", "error"); return; }
+        if (!data.email_configured) {
+            showToast("SMTP not configured — no emails were sent", "error");
+        } else {
+            showToast(`Email sent to ${data.sent_to} user(s)`, "success");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
 // --- Admin Sub-Tabs ---
 
 function setupAdminSubTabs() {
@@ -1460,6 +1547,7 @@ function renderAdminPanel() {
     renderSeasonManagement();
     populateAuditUserSelect();
     loadAdminBonusQuestions();
+    loadAdminEmailPanel();
 }
 
 // --- Tribe Management (Admin) ---
