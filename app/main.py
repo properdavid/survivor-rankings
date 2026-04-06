@@ -86,6 +86,12 @@ def startup():
                 conn.execute(text("ALTER TABLE seasons ADD COLUMN episode_count INTEGER"))
                 conn.commit()
 
+        if "bonus_questions" in table_names:
+            bq_cols = {col["name"] for col in inspector.get_columns("bonus_questions")}
+            if "answer_type" not in bq_cols:
+                conn.execute(text("ALTER TABLE bonus_questions ADD COLUMN answer_type VARCHAR"))
+                conn.commit()
+
         # Migrate post_reactions: old constraint was (post_id, user_id), new is (post_id, user_id, reaction_type)
         if "post_reactions" in table_names:
             # Check if the old unique constraint exists by inspecting unique constraints
@@ -164,6 +170,7 @@ def startup():
             ]:
                 db.add(tribe)
             db.commit()
+
 
         # Backfill audit log for users who have rankings but no audit entries
         users_with_rankings = (

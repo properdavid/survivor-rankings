@@ -1772,3 +1772,56 @@ footer .season-select {
 .audit-snapshot-meta p {
     margin: 0;
 }
+
+/* === Bonus Questions === */
+.bonus-answer-input {
+    width: 100%;
+    text-align: left;
+    resize: vertical;
+    box-sizing: border-box;
+    font-family: inherit;
+    line-height: 1.4;
+}
+.bonus-answer-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    width: 100%;
+}
+.bonus-wager-row label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.bonus-my-answer {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    padding: 0.4rem 0;
+}
+.bonus-saved-note {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+.bonus-all-answers {
+    margin-top: 0.5rem;
+}
+.bonus-all-answers summary {
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+.bonus-deadline {
+    font-size: 0.8rem;
+}
+.deadline-upcoming {
+    color: var(--text-muted);
+}
+.deadline-past {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+}

@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, UniqueConstraint, Boolean
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from datetime import datetime, timezone
 
 from app.database import Base
@@ -16,6 +17,7 @@ class User(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     rankings = relationship("Ranking", back_populates="user", cascade="all, delete-orphan")
+    bonus_answers = relationship("BonusAnswer", back_populates="user", cascade="all, delete-orphan")
 
 
 class Season(Base):
@@ -32,6 +34,7 @@ class Season(Base):
     tribe_configs = relationship("TribeConfig", back_populates="season", cascade="all, delete-orphan")
     rankings = relationship("Ranking", back_populates="season", cascade="all, delete-orphan")
     episode_threads = relationship("EpisodeThread", back_populates="season", cascade="all, delete-orphan")
+    bonus_questions = relationship("BonusQuestion", back_populates="season", cascade="all, delete-orphan")
 
 
 class Contestant(Base):
@@ -167,3 +170,45 @@ class RankingAuditEntry(Base):
     rank = Column(Integer, nullable=False)
 
     submission = relationship("RankingAuditSubmission", back_populates="entries")
+
+
+class BonusQuestion(Base):
+    __tablename__ = "bonus_questions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    season_id = Column(Integer, ForeignKey("seasons.id"), nullable=False)
+    question_text = Column(String, nullable=False)
+    question_type = Column(String, nullable=False)   # "standard" or "wager"
+    answer_type = Column(String, nullable=True)      # "contestant", "integer", or "string" (default)
+    deadline_utc = Column(DateTime, nullable=False)  # stored as UTC
+    # Standard scoring fields
+    points_value = Column(Integer, nullable=True)          # full credit
+    partial_points_value = Column(Integer, nullable=True)  # partial credit (default 0)
+    # Wager scoring fields
+    max_wager = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    answers = relationship("BonusAnswer", back_populates="question", cascade="all, delete-orphan")
+    season = relationship("Season", back_populates="bonus_questions")
+
+
+class BonusAnswer(Base):
+    __tablename__ = "bonus_answers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    question_id = Column(Integer, ForeignKey("bonus_questions.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    answer_text = Column(String, nullable=False)
+    wager = Column(Integer, nullable=True)          # wager questions only
+    outcome = Column(String, nullable=True)         # NULL until graded: "correct"/"partial"/"incorrect"
+    points_earned = Column(Integer, nullable=True)  # NULL until graded
+    submitted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    question = relationship("BonusQuestion", back_populates="answers")
+    user = relationship("User", back_populates="bonus_answers")
+
+    __table_args__ = (
+        UniqueConstraint("question_id", "user_id", name="uq_bonus_question_user"),
+    )

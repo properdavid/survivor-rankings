@@ -22,6 +22,7 @@
                 <button class="nav-btn active" data-tab="rankings">My Rankings</button>
                 <button class="nav-btn" data-tab="scores">My Scores</button>
                 <button class="nav-btn auth-only" data-tab="leaderboard" style="display:none;">Leaderboard</button>
+                <button class="nav-btn auth-only" data-tab="bonus" style="display:none;">Bonus Questions</button>
                 <button class="nav-btn auth-only" data-tab="discussion" style="display:none;">Discussion</button>
                 <button class="nav-btn" data-tab="help">How to Play</button>
                 <button class="nav-btn admin-only" data-tab="admin" style="display:none;">Admin</button>
@@ -95,6 +96,38 @@
             <div id="discussion-admin-area"></div>
             <div id="discussion-episode-list"></div>
             <div id="discussion-thread-view" style="display:none;"></div>
+        </section>
+
+        <!-- Bonus Questions Tab -->
+        <section id="tab-bonus" class="tab-content">
+            <div class="tab-header">
+                <h2>Bonus Questions</h2>
+                <p>Answer bonus questions throughout the season for extra points.</p>
+            </div>
+            <div class="help-section" style="margin-bottom:1.5rem">
+                <p>Each question has a <strong>deadline</strong> — once it passes, you can no longer submit or change your answer, and everyone's answers become visible.</p>
+                <h3 style="margin-top:1rem">Scoring Types</h3>
+                <div class="help-section" style="margin-top:0.5rem;padding-top:0.5rem">
+                    <h4 class="help-subheader">Standard</h4>
+                    <p>A fixed number of points are awarded based on how correct your answer is. Full points for a correct answer, partial points for a close answer, and no points for an incorrect answer.</p>
+                </div>
+                <div class="help-section" style="margin-top:0.5rem;padding-top:0.5rem">
+                    <h4 class="help-subheader">Wager</h4>
+                    <p>You choose how many points to put on the line (up to the question's maximum). The outcome determines what happens to your wager:</p>
+                    <table class="scoring-table" style="margin-top:0.5rem">
+                        <thead>
+                            <tr><th>Result</th><th>Points</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr class="row-perfect"><td>✅ Correct</td><td>+wager (you gain your wager amount)</td></tr>
+                            <tr><td>〰️ Partial</td><td>±0 (you break even)</td></tr>
+                            <tr class="row-zero"><td>❌ Incorrect</td><td>−wager (you lose your wager amount)</td></tr>
+                        </tbody>
+                    </table>
+                    <p class="help-note" style="margin-top:0.5rem">Bonus points are added to your total score and reflected on the leaderboard once an admin records the outcome.</p>
+                </div>
+            </div>
+            <div id="bonus-questions-list"></div>
         </section>
 
         <!-- Help Tab -->
@@ -187,6 +220,7 @@
                 <button class="admin-sub-btn" data-admin-tab="tribes">Tribe Management</button>
                 <button class="admin-sub-btn" data-admin-tab="seasons">Season Management</button>
                 <button class="admin-sub-btn" data-admin-tab="users">User Management</button>
+                <button class="admin-sub-btn" data-admin-tab="bonus">Bonus Questions</button>
                 <button class="admin-sub-btn" data-admin-tab="database">Database</button>
                 <button class="admin-sub-btn" data-admin-tab="audit">Audit Log</button>
             </div>
@@ -219,6 +253,10 @@
                 <p class="section-desc">Promote or demote users between admin and standard roles</p>
                 <div id="admin-users" class="admin-list"></div>
             </div>
+            <div id="admin-panel-bonus" class="admin-panel-section" style="display:none;">
+                <p class="section-desc">Create and grade bonus questions for the active season</p>
+                <div id="admin-bonus-content"></div>
+            </div>
             <div id="admin-panel-database" class="admin-panel-section" style="display:none;">
                 <p class="section-desc">Export and import the full database for backup and restore</p>
                 <div class="database-admin">
@@ -250,7 +288,7 @@
     <footer>
         <div class="footer-content">
             <select id="season-select" class="season-select" onchange="switchSeason(this.value)" title="Switch season"></select>
-            <p><a href="#" onclick="showWhatsNew(); return false" class="version-link">Survivor Rankings v30</a></p>
+            <p><a href="#" onclick="showWhatsNew(); return false" class="version-link">Survivor Rankings v31</a></p>
         </div>
     </footer>
 

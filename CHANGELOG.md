@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## v31
+
+**Bonus Questions**
+- New "Bonus Questions" tab lets players answer optional questions for extra points throughout the season
+- Two scoring types: Standard (fixed points for correct/partial answers) and Wager (risk points for bigger gains or losses)
+- Configurable per-question deadlines in Pacific time — answers lock automatically after the deadline
+- Players can update their answer any time before the deadline
+- All answers are hidden until the deadline passes (including from admins)
+- Admin panel section to create questions, set scoring parameters, and grade submitted answers
+- Bonus points are included in each player's score and leaderboard total
+
 ## v30
 
 **Automatic Cache Busting**

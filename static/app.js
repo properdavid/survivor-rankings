@@ -297,6 +297,7 @@ function switchTab(tab) {
 
     if (tab === "scores" && currentUser) loadMyScores();
     if (tab === "leaderboard") loadLeaderboard();
+    if (tab === "bonus" && currentUser) loadBonusQuestions();
     if (tab === "discussion") loadDiscussionTab();
     if (tab === "admin" && currentUser?.is_admin) renderAdminPanel();
 }
@@ -694,6 +695,9 @@ function renderScores(data) {
         return;
     }
 
+    const bonusSummary = (data.bonus_total !== undefined && data.bonus_total !== 0)
+        ? `<div class="score-detail">Rankings: ${data.ranking_score ?? data.total_score} pts • Bonus: ${data.bonus_total > 0 ? "+" : ""}${data.bonus_total} pts</div>`
+        : "";
     summary.innerHTML = `
         <div class="total-score">${data.total_score}</div>
         <div class="score-label">Total Points</div>
@@ -701,7 +705,32 @@ function renderScores(data) {
             ${data.contestants_scored} of ${data.total_contestants} contestants eliminated
             ${data.max_possible > 0 ? ` • Max possible: ${data.max_possible}` : ""}
         </div>
+        ${bonusSummary}
     `;
+
+    const bonusSection = (data.bonus_questions && data.bonus_questions.length > 0) ? `
+        <h3 style="margin:1.5rem 0 0.5rem">Bonus Questions</h3>
+        ${data.bonus_questions.map(bq => {
+            const pts = bq.points_earned;
+            const ptsClass = pts > 0 ? "points-positive" : pts < 0 ? "points-zero" : "points-pending";
+            const ptsText = pts > 0 ? `+${pts} pts` : pts < 0 ? `${pts} pts` : "0 pts";
+            const outcomeBadge = bq.outcome === "correct" ? `<span class="finalist-badge winner-badge">Correct</span>`
+                : bq.outcome === "partial" ? `<span class="finalist-badge">Partial</span>`
+                : `<span class="finalist-badge removed-badge">Incorrect</span>`;
+            return `
+                <div class="score-row">
+                    <div class="contestant-info">
+                        <div>
+                            <span class="contestant-name">${escapeHtml(bq.question_text)}</span>
+                            ${outcomeBadge}
+                            <div class="prediction-detail">Your answer: ${escapeHtml(bq.answer_text)}${bq.wager ? ` • Wager: ${bq.wager} pts` : ""}</div>
+                        </div>
+                    </div>
+                    <span class="score-points ${ptsClass}">${ptsText}</span>
+                </div>
+            `;
+        }).join("")}
+    ` : "";
 
     breakdown.innerHTML = data.breakdown.map(b => {
         let pointsClass = "points-pending";
@@ -741,7 +770,7 @@ function renderScores(data) {
                 <span class="score-points ${pointsClass}">${pointsText}</span>
             </div>
         `;
-    }).join("");
+    }).join("") + bonusSection;
 }
 
 // --- Leaderboard ---
@@ -790,13 +819,492 @@ function renderLeaderboard(data) {
                     </div>
                     <div class="leaderboard-detail">
                         ${entry.contestants_scored} scored
-                        ${entry.max_possible > 0 ? ` • ${Math.round(entry.total_score / entry.max_possible * 100)}% accuracy` : ""}
+                        ${entry.max_possible > 0 ? ` • ${Math.round((entry.ranking_score ?? entry.total_score) / entry.max_possible * 100)}% accuracy` : ""}
+                        ${entry.bonus_total ? ` • Bonus: ${entry.bonus_total > 0 ? "+" : ""}${entry.bonus_total} pts` : ""}
                     </div>
                 </div>
             </div>
             <span class="leaderboard-score">${entry.total_score} pts</span>
         </div>
     `).join("");
+}
+
+// --- Bonus Questions ---
+
+function ptDatetimeToUTC(value) {
+    // Convert a datetime-local value (entered as Pacific Time) to a UTC ISO string.
+    // Append the PT offset directly so JS parses the time as PT regardless of the
+    // browser's local timezone. Months 4–10 are PDT (UTC-7), others are PST (UTC-8).
+    const month = parseInt(value.slice(5, 7), 10); // 1-indexed month from "YYYY-MM-..."
+    const offsetStr = (month >= 4 && month <= 10) ? "-07:00" : "-08:00";
+    return new Date(value + ":00" + offsetStr).toISOString();
+}
+
+function formatDeadlinePT(utcIso) {
+    // Python isoformat() omits the 'Z' suffix on naive datetimes, so JS would
+    // parse the string as local time instead of UTC. Append 'Z' to force UTC.
+    const utcStr = utcIso.endsWith("Z") || utcIso.includes("+") ? utcIso : utcIso + "Z";
+    return new Date(utcStr).toLocaleString("en-US", {
+        timeZone: "America/Los_Angeles",
+        weekday: "short", month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit", timeZoneName: "short",
+    });
+}
+
+async function loadBonusQuestions() {
+    const container = document.getElementById("bonus-questions-list");
+    container.innerHTML = `<div class="empty-state"><span class="emoji">⏳</span><p>Loading...</p></div>`;
+    try {
+        const res = await fetch(`/api/bonus-questions${seasonParam()}`);
+        const data = await res.json();
+        renderBonusQuestions(data);
+    } catch (e) {
+        console.error("Failed to load bonus questions:", e);
+        container.innerHTML = `<div class="empty-state"><p>Failed to load bonus questions.</p></div>`;
+    }
+}
+
+function renderBonusQuestions(questions) {
+    const container = document.getElementById("bonus-questions-list");
+
+    if (questions.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <span class="emoji">❓</span>
+                <p>No bonus questions yet. Check back soon!</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = questions.map(q => {
+        const typeLabel = q.question_type === "wager" ? "Wager" : "Standard";
+        const deadlineStr = formatDeadlinePT(q.deadline_utc);
+        const isPast = q.is_past_deadline;
+        const myAnswer = q.my_answer;
+
+        let answerSection = "";
+        if (!isPast) {
+            // Show answer form (pre-filled if existing answer)
+            const existingAnswer = myAnswer ? myAnswer.answer_text : "";
+            const existingWager = myAnswer ? myAnswer.wager : "";
+
+            let answerInput = "";
+            if (q.answer_type === "contestant") {
+                const activeContestants = contestants.filter(c => c.elimination_order === null && !c.is_removed);
+                const eliminatedContestants = contestants.filter(c => c.elimination_order !== null || c.is_removed);
+                const makeOption = c => `<option value="${escapeHtml(c.name)}" ${existingAnswer === c.name ? "selected" : ""}>${escapeHtml(c.name)}</option>`;
+                answerInput = `
+                    <select class="admin-input bonus-answer-input" id="bonus-answer-${q.id}">
+                        <option value="">— Select a contestant —</option>
+                        ${activeContestants.length ? `<optgroup label="Still in the game">${activeContestants.map(makeOption).join("")}</optgroup>` : ""}
+                        ${eliminatedContestants.length ? `<optgroup label="Eliminated / Removed">${eliminatedContestants.map(makeOption).join("")}</optgroup>` : ""}
+                    </select>`;
+            } else if (q.answer_type === "integer") {
+                answerInput = `<input type="number" class="admin-input bonus-answer-input" id="bonus-answer-${q.id}"
+                               value="${escapeHtml(existingAnswer)}" placeholder="Enter a number" style="width:140px;text-align:left">`;
+            } else {
+                answerInput = `<textarea class="admin-input bonus-answer-input" id="bonus-answer-${q.id}"
+                               placeholder="Type your answer..." rows="2">${escapeHtml(existingAnswer)}</textarea>`;
+            }
+
+            const wagerInput = q.question_type === "wager" ? `
+                <div class="bonus-wager-row">
+                    <label>Wager (1–${q.max_wager} pts):
+                        <input type="number" class="admin-input" id="bonus-wager-${q.id}"
+                               min="1" max="${q.max_wager}" value="${existingWager}" style="width:80px">
+                    </label>
+                </div>
+            ` : "";
+            const btnLabel = myAnswer ? "Update Answer" : "Submit Answer";
+            answerSection = `
+                <div class="bonus-answer-form">
+                    ${answerInput}
+                    ${wagerInput}
+                    <button class="admin-btn btn-winner" onclick="submitBonusAnswer(${q.id}, ${q.question_type === "wager"})">${btnLabel}</button>
+                    ${myAnswer ? `<span class="bonus-saved-note">Answer saved ✓</span>` : ""}
+                </div>
+            `;
+        } else {
+            // Deadline passed — show user's answer (if any) and toggle for all answers
+            const myAnswerBlock = myAnswer ? `
+                <div class="bonus-my-answer">
+                    <strong>Your answer:</strong> ${escapeHtml(myAnswer.answer_text)}
+                    ${myAnswer.wager ? ` • Wager: ${myAnswer.wager} pts` : ""}
+                    ${myAnswer.outcome ? ` • <strong>${myAnswer.outcome}</strong> (${myAnswer.points_earned > 0 ? "+" : ""}${myAnswer.points_earned} pts)` : " • Pending grade"}
+                </div>
+            ` : `<div class="bonus-my-answer">You did not answer this question.</div>`;
+
+            const allAnswersBlock = q.all_answers.length > 0 ? `
+                <details class="bonus-all-answers">
+                    <summary>View all answers (${q.all_answers.length})</summary>
+                    <table class="scoring-table" style="margin-top:0.5rem">
+                        <thead><tr><th>Player</th><th>Answer</th>${q.question_type === "wager" ? "<th>Wager</th>" : ""}<th>Result</th></tr></thead>
+                        <tbody>
+                            ${q.all_answers.map(a => `
+                                <tr>
+                                    <td>${escapeHtml(a.user_name)}</td>
+                                    <td>${escapeHtml(a.answer_text)}</td>
+                                    ${q.question_type === "wager" ? `<td>${a.wager ?? "—"} pts</td>` : ""}
+                                    <td>${a.outcome ? `${a.outcome} (${a.points_earned > 0 ? "+" : ""}${a.points_earned} pts)` : "Pending"}</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </details>
+            ` : `<p class="help-note">No answers submitted.</p>`;
+
+            answerSection = myAnswerBlock + allAnswersBlock;
+        }
+
+        const scoringNote = q.question_type === "wager"
+            ? `Max wager: ${q.max_wager} pts — Correct: +wager | Partial: break even | Incorrect: −wager`
+            : `Correct: ${q.points_value} pts${q.partial_points_value ? ` | Partial: ${q.partial_points_value} pts` : ""}`;
+
+        return `
+            <div class="admin-item" style="flex-direction:column;align-items:flex-start;gap:0.75rem">
+                <div>
+                    <span class="contestant-name">${escapeHtml(q.question_text)}</span>
+                    <span class="role-badge role-${q.question_type === "wager" ? "admin" : "standard"}" style="margin-left:0.5rem">${typeLabel}</span>
+                    <div class="bonus-deadline ${isPast ? "deadline-past" : "deadline-upcoming"}" style="margin-top:0.25rem">
+                        ${isPast ? "Closed" : "Closes"}: ${deadlineStr}
+                    </div>
+                </div>
+                <div class="help-note" style="margin:0">${scoringNote}</div>
+                ${answerSection}
+            </div>
+        `;
+    }).join("");
+}
+
+async function submitBonusAnswer(questionId, isWager) {
+    const answerEl = document.getElementById(`bonus-answer-${questionId}`);
+    const answer = answerEl ? answerEl.value.trim() : "";
+    if (!answer) { showToast("Please enter an answer", "error"); return; }
+
+    const body = { answer_text: answer };
+    if (isWager) {
+        const wagerEl = document.getElementById(`bonus-wager-${questionId}`);
+        const wager = wagerEl ? parseInt(wagerEl.value, 10) : 0;
+        if (!wager || wager < 1) { showToast("Please enter a valid wager amount", "error"); return; }
+        body.wager = wager;
+    }
+
+    try {
+        const res = await fetch(`/api/bonus-questions/${questionId}/answer${seasonParam()}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || "Answer saved!", "success");
+            await loadBonusQuestions();
+        } else {
+            showToast(data.detail || "Failed to save answer", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+// --- Admin: Bonus Questions ---
+
+async function loadAdminBonusQuestions() {
+    try {
+        const res = await fetch(`/api/bonus-questions${seasonParam()}`);
+        if (!res.ok) return;
+        const questions = await res.json();
+        renderAdminBonusPanel(questions);
+    } catch (e) {
+        console.error("Failed to load admin bonus questions:", e);
+    }
+}
+
+function renderAdminBonusPanel(questions) {
+    const container = document.getElementById("admin-bonus-content");
+    if (!container) return;
+
+    const questionsList = questions.length === 0
+        ? `<div class="empty-state"><span class="emoji">❓</span><p>No bonus questions yet.</p></div>`
+        : questions.map(q => {
+            const isPast = q.is_past_deadline;
+            const deadlineStr = formatDeadlinePT(q.deadline_utc);
+            const scoringInfo = q.question_type === "wager"
+                ? `Max wager: ${q.max_wager} pts`
+                : `Correct: ${q.points_value} pts | Partial: ${q.partial_points_value ?? 0} pts`;
+
+            const gradingTable = isPast && q.all_answers.length > 0 ? `
+                <details class="bonus-all-answers" style="margin-top:0.5rem">
+                    <summary>Grade answers (${q.all_answers.length} submitted)</summary>
+                    <table class="scoring-table" style="margin-top:0.5rem">
+                        <thead>
+                            <tr>
+                                <th>Player</th>
+                                <th>Answer</th>
+                                ${q.question_type === "wager" ? "<th>Wager</th>" : ""}
+                                <th>Grade</th>
+                                <th>Result</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${q.all_answers.map(a => `
+                                <tr>
+                                    <td>${escapeHtml(a.user_name)}</td>
+                                    <td>${escapeHtml(a.answer_text)}</td>
+                                    ${q.question_type === "wager" ? `<td>${a.wager ?? "—"} pts</td>` : ""}
+                                    <td>
+                                        <select class="admin-input" id="grade-${q.id}-${a.user_id}" style="width:auto">
+                                            <option value="correct" ${a.outcome === "correct" ? "selected" : ""}>Correct</option>
+                                            <option value="partial" ${a.outcome === "partial" ? "selected" : ""}>Partial</option>
+                                            <option value="incorrect" ${a.outcome === "incorrect" ? "selected" : ""}>Incorrect</option>
+                                        </select>
+                                        <button class="admin-btn btn-winner" style="margin-left:0.25rem"
+                                                onclick="gradeAnswer(${q.id}, ${a.user_id})">Grade</button>
+                                    </td>
+                                    <td>${a.outcome ? `${a.outcome} (${a.points_earned > 0 ? "+" : ""}${a.points_earned} pts)` : "Pending"}</td>
+                                </tr>
+                            `).join("")}
+                        </tbody>
+                    </table>
+                </details>
+            ` : isPast ? `<p class="help-note" style="margin:0.5rem 0 0">No answers submitted.</p>` : "";
+
+            // Pre-compute deadline as a datetime-local value for the edit form
+            const deadlineDate = new Date((q.deadline_utc.endsWith("Z") || q.deadline_utc.includes("+") ? q.deadline_utc : q.deadline_utc + "Z"));
+            const ptOffset = (() => { const m = deadlineDate.toLocaleString("en-US", {timeZone:"America/Los_Angeles",month:"numeric"}).padStart(2,"0"); const mo = parseInt(m,10); return (mo >= 4 && mo <= 10) ? -7 : -8; })();
+            const ptDate = new Date(deadlineDate.getTime() + ptOffset * 60 * 60 * 1000);
+            const pad = n => String(n).padStart(2,"0");
+            const deadlineLocalValue = `${ptDate.getUTCFullYear()}-${pad(ptDate.getUTCMonth()+1)}-${pad(ptDate.getUTCDate())}T${pad(ptDate.getUTCHours())}:${pad(ptDate.getUTCMinutes())}`;
+
+            const editForm = `
+                <details class="bonus-edit-form" id="edit-form-${q.id}">
+                    <summary style="cursor:pointer;font-size:0.9rem;color:var(--text-muted);margin-top:0.25rem">Edit question</summary>
+                    <div style="display:flex;flex-direction:column;gap:0.5rem;margin-top:0.75rem">
+                        <textarea class="admin-input bonus-answer-input" id="eq-text-${q.id}" rows="3">${escapeHtml(q.question_text)}</textarea>
+                        <div style="display:flex;gap:0.75rem;flex-wrap:wrap">
+                            <label>Scoring type:
+                                <select class="admin-input" id="eq-type-${q.id}" onchange="toggleEditTypeFields(${q.id})" style="width:auto">
+                                    <option value="wager" ${q.question_type === "wager" ? "selected" : ""}>Wager</option>
+                                    <option value="standard" ${q.question_type === "standard" ? "selected" : ""}>Standard</option>
+                                </select>
+                            </label>
+                            <label>Answer type:
+                                <select class="admin-input" id="eq-answer-type-${q.id}" style="width:auto">
+                                    <option value="contestant" ${(q.answer_type||"string") === "contestant" ? "selected" : ""}>Contestant</option>
+                                    <option value="string" ${(q.answer_type||"string") === "string" ? "selected" : ""}>Free text</option>
+                                    <option value="integer" ${(q.answer_type||"string") === "integer" ? "selected" : ""}>Number</option>
+                                </select>
+                            </label>
+                            <label>Deadline (Pacific Time):
+                                <input type="datetime-local" class="admin-input" id="eq-deadline-${q.id}" value="${deadlineLocalValue}" style="width:auto;text-align:left">
+                            </label>
+                        </div>
+                        <div id="eq-fields-wager-${q.id}" style="display:${q.question_type === "wager" ? "flex" : "none"};gap:0.75rem">
+                            <label>Max wager (pts): <input type="number" class="admin-input" id="eq-max-wager-${q.id}" min="1" value="${q.max_wager ?? ""}" style="width:80px"></label>
+                        </div>
+                        <div id="eq-fields-standard-${q.id}" style="display:${q.question_type === "standard" ? "flex" : "none"};gap:0.75rem">
+                            <label>Full credit (pts): <input type="number" class="admin-input" id="eq-points-${q.id}" min="1" value="${q.points_value ?? ""}" style="width:80px"></label>
+                            <label>Partial credit (pts): <input type="number" class="admin-input" id="eq-partial-${q.id}" min="0" value="${q.partial_points_value ?? 0}" style="width:80px"></label>
+                        </div>
+                        <div>
+                            <button class="admin-btn btn-winner" onclick="saveEditBonusQuestion(${q.id})">Save Changes</button>
+                        </div>
+                    </div>
+                </details>
+            `;
+
+            return `
+                <div class="admin-item" style="flex-direction:column;align-items:flex-start;gap:0.5rem">
+                    <div style="display:flex;justify-content:space-between;width:100%;align-items:flex-start">
+                        <div>
+                            <span class="contestant-name">${escapeHtml(q.question_text)}</span>
+                            <span class="role-badge role-${q.question_type === "wager" ? "admin" : "standard"}" style="margin-left:0.5rem">${q.question_type}</span>
+                        </div>
+                        <button class="admin-btn btn-danger" onclick="deleteBonusQuestion(${q.id})" style="flex-shrink:0">Delete</button>
+                    </div>
+                    <div class="help-note" style="margin:0">Deadline: ${deadlineStr} | ${scoringInfo} | Answer: ${q.answer_type || "string"}</div>
+                    ${editForm}
+                    ${gradingTable}
+                </div>
+            `;
+        }).join("");
+
+    container.innerHTML = `
+        ${questionsList}
+        <div class="tribe-add-form" style="flex-direction:column;align-items:stretch;margin-top:1rem">
+            <h3 style="margin:0 0 0.75rem">Add Bonus Question</h3>
+            <textarea class="admin-input bonus-answer-input" id="bq-text" placeholder="Question text..." rows="3"></textarea>
+            <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.5rem">
+                <label>Scoring type:
+                    <select class="admin-input" id="bq-type" onchange="toggleBonusTypeFields()" style="width:auto">
+                        <option value="wager">Wager</option>
+                        <option value="standard">Standard</option>
+                    </select>
+                </label>
+                <label>Answer type:
+                    <select class="admin-input" id="bq-answer-type" style="width:auto">
+                        <option value="contestant">Contestant</option>
+                        <option value="string">Free text</option>
+                        <option value="integer">Number</option>
+                    </select>
+                </label>
+                <label>Deadline (Pacific Time):
+                    <input type="datetime-local" class="admin-input" id="bq-deadline" style="width:auto;text-align:left">
+                </label>
+            </div>
+            <div id="bq-fields-wager" style="display:flex;gap:0.75rem;margin-top:0.5rem">
+                <label>Max wager (pts): <input type="number" class="admin-input" id="bq-max-wager" min="1" value="10" style="width:80px"></label>
+            </div>
+            <div id="bq-fields-standard" style="display:none;gap:0.75rem;margin-top:0.5rem">
+                <label>Full credit (pts): <input type="number" class="admin-input" id="bq-points" min="1" value="10" style="width:80px"></label>
+                <label>Partial credit (pts): <input type="number" class="admin-input" id="bq-partial" min="0" value="0" style="width:80px"></label>
+            </div>
+            <button class="admin-btn btn-winner" onclick="createBonusQuestion()" style="margin-top:0.75rem;align-self:flex-start">Add Question</button>
+        </div>
+    `;
+}
+
+function toggleBonusTypeFields() {
+    const type = document.getElementById("bq-type")?.value;
+    const wagerDiv = document.getElementById("bq-fields-wager");
+    const stdDiv = document.getElementById("bq-fields-standard");
+    if (!wagerDiv || !stdDiv) return;
+    wagerDiv.style.display = type === "wager" ? "flex" : "none";
+    stdDiv.style.display = type === "standard" ? "flex" : "none";
+}
+
+async function createBonusQuestion() {
+    const text = document.getElementById("bq-text")?.value.trim();
+    const type = document.getElementById("bq-type")?.value;
+    const deadlineLocal = document.getElementById("bq-deadline")?.value;
+
+    if (!text) { showToast("Question text is required", "error"); return; }
+    if (!deadlineLocal) { showToast("Deadline is required", "error"); return; }
+
+    const deadline_utc = ptDatetimeToUTC(deadlineLocal);
+    const answerType = document.getElementById("bq-answer-type")?.value || "string";
+    const body = { question_text: text, question_type: type, answer_type: answerType, deadline_utc };
+
+    if (type === "wager") {
+        const maxWager = parseInt(document.getElementById("bq-max-wager")?.value, 10);
+        if (!maxWager || maxWager < 1) { showToast("Max wager must be at least 1", "error"); return; }
+        body.max_wager = maxWager;
+    } else {
+        const pts = parseInt(document.getElementById("bq-points")?.value, 10);
+        const partial = parseInt(document.getElementById("bq-partial")?.value, 10) || 0;
+        if (!pts || pts < 1) { showToast("Points value must be at least 1", "error"); return; }
+        body.points_value = pts;
+        body.partial_points_value = partial;
+    }
+
+    try {
+        const res = await fetch(`/api/admin/bonus-questions${seasonParam()}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || "Question created", "success");
+            await loadAdminBonusQuestions();
+        } else {
+            showToast(data.detail || "Failed to create question", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+async function deleteBonusQuestion(questionId) {
+    if (!confirm("Delete this bonus question and all answers?")) return;
+    try {
+        const res = await fetch(`/api/admin/bonus-questions/${questionId}`, { method: "DELETE" });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || "Question deleted", "success");
+            await loadAdminBonusQuestions();
+        } else {
+            showToast(data.detail || "Failed to delete question", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+function toggleEditTypeFields(questionId) {
+    const type = document.getElementById(`eq-type-${questionId}`)?.value;
+    const wagerDiv = document.getElementById(`eq-fields-wager-${questionId}`);
+    const stdDiv = document.getElementById(`eq-fields-standard-${questionId}`);
+    if (!wagerDiv || !stdDiv) return;
+    wagerDiv.style.display = type === "wager" ? "flex" : "none";
+    stdDiv.style.display = type === "standard" ? "flex" : "none";
+}
+
+async function saveEditBonusQuestion(questionId) {
+    const text = document.getElementById(`eq-text-${questionId}`)?.value.trim();
+    const type = document.getElementById(`eq-type-${questionId}`)?.value;
+    const answerType = document.getElementById(`eq-answer-type-${questionId}`)?.value;
+    const deadlineLocal = document.getElementById(`eq-deadline-${questionId}`)?.value;
+
+    if (!text) { showToast("Question text is required", "error"); return; }
+    if (!deadlineLocal) { showToast("Deadline is required", "error"); return; }
+
+    const body = {
+        question_text: text,
+        answer_type: answerType,
+        deadline_utc: ptDatetimeToUTC(deadlineLocal),
+    };
+
+    if (type === "wager") {
+        const maxWager = parseInt(document.getElementById(`eq-max-wager-${questionId}`)?.value, 10);
+        if (!maxWager || maxWager < 1) { showToast("Max wager must be at least 1", "error"); return; }
+        body.max_wager = maxWager;
+    } else {
+        const pts = parseInt(document.getElementById(`eq-points-${questionId}`)?.value, 10);
+        const partial = parseInt(document.getElementById(`eq-partial-${questionId}`)?.value, 10) || 0;
+        if (!pts || pts < 1) { showToast("Points value must be at least 1", "error"); return; }
+        body.points_value = pts;
+        body.partial_points_value = partial;
+    }
+
+    try {
+        const res = await fetch(`/api/admin/bonus-questions/${questionId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || "Question updated", "success");
+            await loadAdminBonusQuestions();
+        } else {
+            showToast(data.detail || "Failed to update question", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
+}
+
+async function gradeAnswer(questionId, userId) {
+    const outcome = document.getElementById(`grade-${questionId}-${userId}`)?.value;
+    if (!outcome) return;
+    try {
+        const res = await fetch(`/api/admin/bonus-questions/${questionId}/grade`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id: userId, outcome }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+            showToast(data.message || "Answer graded", "success");
+            await loadAdminBonusQuestions();
+        } else {
+            showToast(data.detail || "Failed to grade answer", "error");
+        }
+    } catch (e) {
+        showToast("Network error", "error");
+    }
 }
 
 // --- Admin Sub-Tabs ---
@@ -951,6 +1459,7 @@ function renderAdminPanel() {
     renderContestantList();
     renderSeasonManagement();
     populateAuditUserSelect();
+    loadAdminBonusQuestions();
 }
 
 // --- Tribe Management (Admin) ---
@@ -1850,6 +2359,11 @@ function backToEpisodeList() {
 // --- What's New ---
 
 const WHATS_NEW = [
+    {
+        version: "v31",
+        title: "Bonus Questions",
+        description: "Answer bonus questions throughout the season for extra points — wager your points for bigger gains!",
+    },
     {
         version: "v30",
         title: "Bug Fixes & Improvements",

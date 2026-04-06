@@ -15,7 +15,8 @@ from PIL import Image
 from app.database import engine, get_db, get_db_path
 import re
 from typing import Optional
-from app.models import User, Season, Contestant, Ranking, TribeConfig, EpisodeThread, DiscussionPost, PostReaction, RankingAuditSubmission, RankingAuditEntry
+from sqlalchemy import func
+from app.models import User, Season, Contestant, Ranking, TribeConfig, EpisodeThread, DiscussionPost, PostReaction, RankingAuditSubmission, RankingAuditEntry, BonusQuestion, BonusAnswer
 from app.scoring import calculate_total_score
 from app.email import send_rankings_email
 
@@ -94,6 +95,35 @@ class ReactionToggle(BaseModel):
 
 class EpisodeCountUpdate(BaseModel):
     episode_count: Optional[int] = None
+
+
+class BonusQuestionCreate(BaseModel):
+    question_text: str
+    question_type: str          # "standard" or "wager"
+    answer_type: str = "string" # "contestant", "integer", or "string"
+    deadline_utc: str           # ISO 8601 UTC string from frontend
+    points_value: Optional[int] = None
+    partial_points_value: Optional[int] = 0
+    max_wager: Optional[int] = None
+
+
+class BonusQuestionUpdate(BaseModel):
+    question_text: Optional[str] = None
+    answer_type: Optional[str] = None
+    deadline_utc: Optional[str] = None
+    points_value: Optional[int] = None
+    partial_points_value: Optional[int] = None
+    max_wager: Optional[int] = None
+
+
+class BonusAnswerSubmit(BaseModel):
+    answer_text: str
+    wager: Optional[int] = None  # required for wager questions
+
+
+class BonusGrade(BaseModel):
+    user_id: int
+    outcome: str                # "correct", "partial", "incorrect"
 
 
 # In-memory cache for cropped images: url -> jpeg bytes (insertion-order LRU eviction)
@@ -794,8 +824,37 @@ def get_my_scores(
         .all()
     )
 
+    # Fetch graded bonus answers for this user+season
+    bonus_rows = (
+        db.query(BonusAnswer, BonusQuestion)
+        .join(BonusQuestion, BonusAnswer.question_id == BonusQuestion.id)
+        .filter(BonusAnswer.user_id == user_id, BonusQuestion.season_id == season.id,
+                BonusAnswer.points_earned.isnot(None))
+        .all()
+    )
+    bonus_total = sum(ba.points_earned for ba, bq in bonus_rows)
+    bonus_breakdown = [
+        {
+            "question_id": bq.id,
+            "question_text": bq.question_text,
+            "answer_text": ba.answer_text,
+            "wager": ba.wager,
+            "outcome": ba.outcome,
+            "points_earned": ba.points_earned,
+        }
+        for ba, bq in bonus_rows
+    ]
+
     if not rankings:
-        return {"total_score": 0, "max_possible": 0, "contestants_scored": 0, "breakdown": []}
+        return {
+            "total_score": bonus_total,
+            "ranking_score": 0,
+            "bonus_total": bonus_total,
+            "bonus_questions": bonus_breakdown,
+            "max_possible": 0,
+            "contestants_scored": 0,
+            "breakdown": [],
+        }
 
     total_contestants = db.query(Contestant).filter(Contestant.season_id == season.id).count()
     ranking_data = [
@@ -809,7 +868,14 @@ def get_my_scores(
         for r in rankings
     ]
 
-    return calculate_total_score(ranking_data, total_contestants)
+    scores = calculate_total_score(ranking_data, total_contestants)
+    return {
+        **scores,
+        "ranking_score": scores["total_score"],
+        "total_score": scores["total_score"] + bonus_total,
+        "bonus_total": bonus_total,
+        "bonus_questions": bonus_breakdown,
+    }
 
 
 @router.get("/leaderboard")
@@ -848,21 +914,323 @@ def get_leaderboard(
     # ranking count equals total_contestants — no separate count query needed.
     total_contestants = len(next(iter(user_rankings.values())))
 
+    # Fetch bonus point totals per user for this season in one query
+    bonus_rows = (
+        db.query(BonusAnswer.user_id, func.sum(BonusAnswer.points_earned))
+        .join(BonusQuestion, BonusAnswer.question_id == BonusQuestion.id)
+        .filter(BonusQuestion.season_id == season.id, BonusAnswer.points_earned.isnot(None))
+        .group_by(BonusAnswer.user_id)
+        .all()
+    )
+    bonus_by_user: dict[int, int] = {uid: pts for uid, pts in bonus_rows}
+
     leaderboard = []
     for user_id, ranking_data in user_rankings.items():
         user = user_meta[user_id]
         scores = calculate_total_score(ranking_data, total_contestants)
+        bonus_total = bonus_by_user.get(user_id, 0)
         leaderboard.append({
             "user_id": user.id,
             "user_name": user.name,
             "user_picture": user.picture,
-            "total_score": scores["total_score"],
+            "ranking_score": scores["total_score"],
+            "bonus_total": bonus_total,
+            "total_score": scores["total_score"] + bonus_total,
             "max_possible": scores["max_possible"],
             "contestants_scored": scores["contestants_scored"],
         })
 
     leaderboard.sort(key=lambda x: x["total_score"], reverse=True)
     return leaderboard
+
+
+# --- Bonus question endpoints ---
+
+def _serialize_question(q: BonusQuestion, user_id: Optional[int], now_utc: datetime) -> dict:
+    """Serialize a BonusQuestion with the current user's answer and, after deadline, all answers."""
+    is_past_deadline = now_utc >= q.deadline_utc
+
+    my_answer = None
+    all_answers = []
+
+    if user_id is not None:
+        for ba in q.answers:
+            if ba.user_id == user_id:
+                my_answer = {
+                    "id": ba.id,
+                    "answer_text": ba.answer_text,
+                    "wager": ba.wager,
+                    "outcome": ba.outcome,
+                    "points_earned": ba.points_earned,
+                    "submitted_at": ba.submitted_at.isoformat(),
+                }
+                break
+
+    if is_past_deadline:
+        all_answers = [
+            {
+                "user_id": ba.user_id,
+                "user_name": ba.user.name,
+                "answer_text": ba.answer_text,
+                "wager": ba.wager,
+                "outcome": ba.outcome,
+                "points_earned": ba.points_earned,
+            }
+            for ba in q.answers
+        ]
+
+    result = {
+        "id": q.id,
+        "season_id": q.season_id,
+        "question_text": q.question_text,
+        "question_type": q.question_type,
+        "answer_type": q.answer_type or "string",
+        "deadline_utc": q.deadline_utc.isoformat(),
+        "is_past_deadline": is_past_deadline,
+        "my_answer": my_answer,
+        "all_answers": all_answers,
+    }
+    if q.question_type == "standard":
+        result["points_value"] = q.points_value
+        result["partial_points_value"] = q.partial_points_value
+    else:
+        result["max_wager"] = q.max_wager
+    return result
+
+
+@router.get("/bonus-questions")
+def get_bonus_questions(
+    request: Request,
+    season: Season = Depends(get_season),
+    db: Session = Depends(get_db),
+):
+    user_id = request.session.get("user_id")
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    questions = (
+        db.query(BonusQuestion)
+        .filter(BonusQuestion.season_id == season.id)
+        .order_by(BonusQuestion.id)
+        .all()
+    )
+    return [_serialize_question(q, user_id, now_utc) for q in questions]
+
+
+@router.post("/bonus-questions/{question_id}/answer")
+def submit_bonus_answer(
+    question_id: int,
+    data: BonusAnswerSubmit,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    user_id = get_current_user_id(request)
+    question = db.query(BonusQuestion).filter(BonusQuestion.id == question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    if now_utc >= question.deadline_utc:
+        raise HTTPException(status_code=400, detail="Deadline has passed — answers can no longer be submitted or changed")
+
+    answer_text = data.answer_text.strip()
+    if not answer_text:
+        raise HTTPException(status_code=400, detail="Answer cannot be empty")
+
+    # Validate and normalise by answer_type
+    answer_type = question.answer_type or "string"
+    if answer_type == "contestant":
+        match = db.query(Contestant).filter(
+            Contestant.season_id == question.season_id,
+            Contestant.name == answer_text,
+        ).first()
+        if not match:
+            raise HTTPException(status_code=400, detail="Invalid contestant — please select from the list")
+    elif answer_type == "integer":
+        try:
+            int(answer_text)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Answer must be a whole number")
+    else:  # string — normalise to lowercase for case-insensitive comparison
+        answer_text = answer_text.lower()
+
+    if question.question_type == "wager":
+        if data.wager is None:
+            raise HTTPException(status_code=400, detail="Wager amount is required for wager questions")
+        if data.wager < 1 or data.wager > question.max_wager:
+            raise HTTPException(status_code=400, detail=f"Wager must be between 1 and {question.max_wager}")
+
+    existing = db.query(BonusAnswer).filter(
+        BonusAnswer.question_id == question_id,
+        BonusAnswer.user_id == user_id,
+    ).first()
+
+    if existing:
+        existing.answer_text = answer_text
+        existing.wager = data.wager if question.question_type == "wager" else None
+        existing.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    else:
+        existing = BonusAnswer(
+            question_id=question_id,
+            user_id=user_id,
+            answer_text=answer_text,
+            wager=data.wager if question.question_type == "wager" else None,
+        )
+        db.add(existing)
+
+    db.commit()
+    db.refresh(existing)
+    return {
+        "id": existing.id,
+        "answer_text": existing.answer_text,
+        "wager": existing.wager,
+        "outcome": existing.outcome,
+        "points_earned": existing.points_earned,
+        "submitted_at": existing.submitted_at.isoformat(),
+        "message": "Answer saved",
+    }
+
+
+@router.post("/admin/bonus-questions")
+def create_bonus_question(
+    data: BonusQuestionCreate,
+    request: Request,
+    season: Season = Depends(get_season),
+    db: Session = Depends(get_db),
+):
+    require_admin(request)
+    require_active_season(season)
+
+    if data.question_type not in ("standard", "wager"):
+        raise HTTPException(status_code=400, detail="question_type must be 'standard' or 'wager'")
+    if data.answer_type not in ("contestant", "integer", "string"):
+        raise HTTPException(status_code=400, detail="answer_type must be 'contestant', 'integer', or 'string'")
+    if data.question_type == "standard" and data.points_value is None:
+        raise HTTPException(status_code=400, detail="points_value is required for standard questions")
+    if data.question_type == "wager" and data.max_wager is None:
+        raise HTTPException(status_code=400, detail="max_wager is required for wager questions")
+
+    try:
+        deadline = datetime.fromisoformat(data.deadline_utc.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid deadline format — use ISO 8601 UTC")
+
+    q = BonusQuestion(
+        season_id=season.id,
+        question_text=data.question_text.strip(),
+        question_type=data.question_type,
+        answer_type=data.answer_type,
+        deadline_utc=deadline,
+        points_value=data.points_value,
+        partial_points_value=data.partial_points_value or 0,
+        max_wager=data.max_wager,
+    )
+    db.add(q)
+    db.commit()
+    db.refresh(q)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    return {**_serialize_question(q, None, now_utc), "message": "Bonus question created"}
+
+
+@router.patch("/admin/bonus-questions/{question_id}")
+def update_bonus_question(
+    question_id: int,
+    data: BonusQuestionUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    require_admin(request)
+    q = db.query(BonusQuestion).filter(BonusQuestion.id == question_id).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    if data.question_text is not None:
+        q.question_text = data.question_text.strip()
+    if data.answer_type is not None:
+        if data.answer_type not in ("contestant", "integer", "string"):
+            raise HTTPException(status_code=400, detail="answer_type must be 'contestant', 'integer', or 'string'")
+        q.answer_type = data.answer_type
+    if data.deadline_utc is not None:
+        try:
+            q.deadline_utc = datetime.fromisoformat(data.deadline_utc.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid deadline format — use ISO 8601 UTC")
+    if data.points_value is not None:
+        q.points_value = data.points_value
+    if data.partial_points_value is not None:
+        q.partial_points_value = data.partial_points_value
+    if data.max_wager is not None:
+        q.max_wager = data.max_wager
+
+    db.commit()
+    db.refresh(q)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    return {**_serialize_question(q, None, now_utc), "message": "Bonus question updated"}
+
+
+@router.delete("/admin/bonus-questions/{question_id}")
+def delete_bonus_question(
+    question_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    require_admin(request)
+    q = db.query(BonusQuestion).filter(BonusQuestion.id == question_id).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    db.delete(q)
+    db.commit()
+    return {"message": "Bonus question deleted"}
+
+
+@router.post("/admin/bonus-questions/{question_id}/grade")
+def grade_bonus_answer(
+    question_id: int,
+    data: BonusGrade,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    require_admin(request)
+
+    if data.outcome not in ("correct", "partial", "incorrect"):
+        raise HTTPException(status_code=400, detail="outcome must be 'correct', 'partial', or 'incorrect'")
+
+    q = db.query(BonusQuestion).filter(BonusQuestion.id == question_id).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    ba = db.query(BonusAnswer).filter(
+        BonusAnswer.question_id == question_id,
+        BonusAnswer.user_id == data.user_id,
+    ).first()
+    if not ba:
+        raise HTTPException(status_code=404, detail="Answer not found for this user")
+
+    if q.question_type == "standard":
+        if data.outcome == "correct":
+            ba.points_earned = q.points_value
+        elif data.outcome == "partial":
+            ba.points_earned = q.partial_points_value or 0
+        else:
+            ba.points_earned = 0
+    else:  # wager
+        if data.outcome == "correct":
+            ba.points_earned = ba.wager
+        elif data.outcome == "partial":
+            ba.points_earned = 0
+        else:
+            ba.points_earned = -(ba.wager)
+
+    ba.outcome = data.outcome
+    db.commit()
+    db.refresh(ba)
+    return {
+        "id": ba.id,
+        "user_id": ba.user_id,
+        "answer_text": ba.answer_text,
+        "wager": ba.wager,
+        "outcome": ba.outcome,
+        "points_earned": ba.points_earned,
+        "message": f"Answer graded as '{data.outcome}'",
+    }
 
 
 # --- Discussion helpers ---
